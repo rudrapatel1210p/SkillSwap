@@ -1,54 +1,101 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { LogIn, UserPlus } from 'lucide-react';
+import { auth } from '../firebase';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendEmailVerification, updateProfile } from 'firebase/auth';
+import { useAuth } from '../context/AuthContext';
 
 const Auth = ({ type }) => {
   const isLogin = type === 'login';
+  const navigate = useNavigate();
+  const { currentUser } = useAuth();
+
+  useEffect(() => {
+    if (currentUser) {
+      if (!currentUser.emailVerified) {
+        navigate('/verify-email');
+      } else {
+        if (localStorage.getItem('isOnboarding') === 'true') {
+          localStorage.removeItem('isOnboarding');
+          navigate('/profile?edit=true');
+        } else {
+          navigate('/explore');
+        }
+      }
+    }
+  }, [currentUser, navigate]);
 
   const [formData, setFormData] = useState({ name: '', email: '', password: '' });
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
     try {
-      const storedUsers = JSON.parse(localStorage.getItem('users') || '[]');
-
       if (isLogin) {
-        const user = storedUsers.find(u => u.email === formData.email && u.password === formData.password);
-        if (user) {
-          localStorage.setItem('isAuthenticated', 'true');
-          localStorage.setItem('currentUser', JSON.stringify(user));
-          window.location.href = '/explore';
+        const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+        
+        // Sync local storage for mock data fallback depending on this app's existing pages
+        const storedUsers = JSON.parse(localStorage.getItem('users') || '[]');
+        let mockMatchedUser = storedUsers.find(u => u.email === formData.email);
+        if (mockMatchedUser) {
+          localStorage.setItem('currentUser', JSON.stringify(mockMatchedUser));
+        }
+        
+        if (!userCredential.user.emailVerified) {
+          navigate('/verify-email');
         } else {
-          setError('No account found. Check your credentials or sign up first.');
+          if (localStorage.getItem('isOnboarding') === 'true') {
+            localStorage.removeItem('isOnboarding');
+            navigate('/profile?edit=true');
+          } else {
+            navigate('/explore');
+          }
         }
       } else {
-        if (storedUsers.some(u => u.email === formData.email)) {
-          setError('This email is already registered. Please log in instead.');
-          return;
-        }
+        const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+        const user = userCredential.user;
+        
+        await updateProfile(user, { displayName: formData.name });
+        await sendEmailVerification(user);
+        
         const selectedRole = localStorage.getItem('selectedRole') || 'student';
+        localStorage.removeItem('selectedRole');
+        
         const newUser = {
-          ...formData,
-          id: Date.now(),
+          name: formData.name,
+          email: formData.email,
+          id: user.uid,
           role: selectedRole,
           skillsOffered: [],
           skillsWanted: [],
           bio: '',
           availability: 'Flexible'
         };
-        localStorage.removeItem('selectedRole');
+        
+        const storedUsers = JSON.parse(localStorage.getItem('users') || '[]');
         storedUsers.push(newUser);
         localStorage.setItem('users', JSON.stringify(storedUsers));
-        localStorage.setItem('isAuthenticated', 'true');
         localStorage.setItem('currentUser', JSON.stringify(newUser));
-        window.location.href = '/onboarding';
+        
+        localStorage.setItem('isOnboarding', 'true');
+        navigate('/verify-email');
       }
     } catch (err) {
-      setError('Something went wrong. Please try again.');
-      console.error(err);
+      if (err.code === 'auth/email-already-in-use') {
+        setError('This email is already registered. Please log in instead.');
+      } else if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+        setError('Invalid credentials. Check your email and password.');
+      } else if (err.code === 'auth/weak-password') {
+        setError('Password should be at least 6 characters.');
+      } else {
+        setError(err.message || 'Something went wrong. Please try again.');
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -126,8 +173,8 @@ const Auth = ({ type }) => {
             />
           </div>
 
-          <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '0.875rem', fontSize: '1rem' }}>
-            {isLogin ? 'Sign In' : 'Sign Up'}
+          <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%', padding: '0.875rem', fontSize: '1rem', opacity: loading ? 0.7 : 1 }}>
+            {loading ? 'Processing...' : (isLogin ? 'Sign In' : 'Sign Up')}
           </button>
         </form>
 

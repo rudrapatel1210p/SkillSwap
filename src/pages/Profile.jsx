@@ -1,17 +1,24 @@
 import React, { useState } from 'react';
-import { User, Settings, Save, X } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { User, Settings, Save, X, MapPin } from 'lucide-react';
+import { State, City } from 'country-state-city';
 
 const Profile = () => {
-  const [isEditing, setIsEditing] = useState(false);
+  const [searchParams] = useSearchParams();
+  const [isEditing, setIsEditing] = useState(searchParams.get('edit') === 'true');
   const [profileData, setProfileData] = useState(() => {
     const saved = localStorage.getItem('currentUser');
-    return saved ? JSON.parse(saved) : {
-      name: 'Rohan Mehta',
-      email: 'rohan.mehta@college.edu.in',
-      bio: 'B.Tech student in Computer Science. Huge tech geek, building random side-projects. Always up for a quick chai and tech discussions!',
-      availability: 'Evenings',
-      skillsOffered: ['React', 'CSS', 'HTML'],
-      skillsWanted: ['Python', 'Figma']
+    const parsedData = saved ? JSON.parse(saved) : null;
+    return {
+      name: parsedData?.name || 'Rohan Mehta',
+      email: parsedData?.email || 'rohan.mehta@college.edu.in',
+      bio: parsedData?.bio || '',
+      availability: parsedData?.availability || 'Evenings',
+      skillsOffered: parsedData?.skillsOffered || ['React', 'CSS', 'HTML'],
+      skillsWanted: parsedData?.skillsWanted || ['Python', 'Figma'],
+      state: parsedData?.state || '',
+      city: parsedData?.city || '',
+      id: parsedData?.id || Date.now()
     };
   });
 
@@ -68,6 +75,14 @@ const Profile = () => {
     }
   };
 
+  const indianStates = State.getStatesOfCountry('IN');
+  const availableCities = (() => {
+    if (!profileData.state) return [];
+    const matchedState = indianStates.find(s => s.name === profileData.state);
+    if (!matchedState) return [];
+    return City.getCitiesOfState('IN', matchedState.isoCode);
+  })();
+
   return (
     <div className="container animate-fade-in" style={{ padding: '2rem 1.5rem', maxWidth: '800px' }}>
       <div className="flex justify-between items-center" style={{ marginBottom: '2rem' }}>
@@ -108,7 +123,12 @@ const Profile = () => {
             ) : (
               <h3 style={{ fontSize: '1.8rem', marginBottom: '0.25rem' }}>{profileData.name}</h3>
             )}
-            <p style={{ color: 'var(--color-text-secondary)', marginTop: '0.25rem' }}>{profileData.email}</p>
+            <p style={{ color: 'var(--color-text-secondary)', marginTop: '0.25rem', marginBottom: '0.25rem' }}>{profileData.email}</p>
+            {(!isEditing && profileData.state && profileData.city) && (
+              <p style={{ color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <MapPin size={16} /> {profileData.city}, {profileData.state}
+              </p>
+            )}
           </div>
         </div>
 
@@ -123,11 +143,12 @@ const Profile = () => {
                   <textarea 
                     className="input-field" 
                     rows="4"
+                    placeholder="Add your bio"
                     value={profileData.bio}
                     onChange={(e) => setProfileData({...profileData, bio: e.target.value})}
                   />
                 ) : (
-                  <p style={{ color: 'var(--color-text-secondary)' }}>{profileData.bio}</p>
+                  <p style={{ color: 'var(--color-text-secondary)', fontStyle: profileData.bio ? 'normal' : 'italic' }}>{profileData.bio || 'No bio added yet.'}</p>
                 )}
               </div>
               <div className="input-group mt-4">
@@ -147,6 +168,40 @@ const Profile = () => {
                   <span className="badge badge-gray">{profileData.availability}</span>
                 )}
               </div>
+
+              {isEditing && (
+                <>
+                  <div className="input-group" style={{ marginTop: '1rem' }}>
+                    <label className="input-label">State (India)</label>
+                    <select 
+                      className="input-field"
+                      value={profileData.state || ''}
+                      onChange={(e) => setProfileData({...profileData, state: e.target.value, city: ''})}
+                    >
+                      <option value="">Select State</option>
+                      {indianStates.map(stateObj => (
+                        <option key={stateObj.isoCode} value={stateObj.name}>{stateObj.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  {profileData.state && (
+                    <div className="input-group" style={{ marginTop: '1rem' }}>
+                      <label className="input-label">City</label>
+                      <select 
+                        className="input-field"
+                        value={profileData.city || ''}
+                        onChange={(e) => setProfileData({...profileData, city: e.target.value})}
+                      >
+                        <option value="">Select City</option>
+                        {availableCities.map(cityObj => (
+                          <option key={cityObj.name} value={cityObj.name}>{cityObj.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
 
             {/* Skills */}

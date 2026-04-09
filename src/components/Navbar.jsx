@@ -1,9 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Sun, Moon } from 'lucide-react';
 import LogoIcon from './Logo';
+import { useAuth } from '../context/AuthContext';
+import { auth } from '../firebase';
+import { signOut } from 'firebase/auth';
 
 const Navbar = () => {
+  const { currentUser } = useAuth();
+  const navigate = useNavigate();
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   useEffect(() => {
@@ -56,15 +61,16 @@ const Navbar = () => {
             {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
           </button>
 
-          {localStorage.getItem('isAuthenticated') === 'true' ? (
+          {currentUser ? (
             <div className="flex gap-4">
               <Link to="/profile" className="btn btn-outline">Profile</Link>
               <button 
                 className="btn btn-primary" 
-                onClick={() => {
+                onClick={async () => {
+                  await signOut(auth);
                   localStorage.removeItem('isAuthenticated');
                   localStorage.removeItem('currentUser');
-                  window.location.href = '/';
+                  navigate('/');
                 }}
               >
                 Logout
