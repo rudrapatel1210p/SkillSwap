@@ -1,43 +1,75 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { User, Settings, Save, X, MapPin } from 'lucide-react';
+import { User, Settings, Save, X, MapPin, Loader } from 'lucide-react';
 import { State, City } from 'country-state-city';
+import { db, auth } from '../firebase';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { useAuth } from '../context/AuthContext';
 
 const Profile = () => {
   const [searchParams] = useSearchParams();
   const [isEditing, setIsEditing] = useState(searchParams.get('edit') === 'true');
-  const [profileData, setProfileData] = useState(() => {
-    const saved = localStorage.getItem('currentUser');
-    const parsedData = saved ? JSON.parse(saved) : null;
-    return {
-      name: parsedData?.name || 'Rohan Mehta',
-      email: parsedData?.email || 'rohan.mehta@college.edu.in',
-      bio: parsedData?.bio || '',
-      availability: parsedData?.availability || 'Evenings',
-      skillsOffered: parsedData?.skillsOffered || ['React', 'CSS', 'HTML'],
-      skillsWanted: parsedData?.skillsWanted || ['Python', 'Figma'],
-      state: parsedData?.state || '',
-      city: parsedData?.city || '',
-      id: parsedData?.id || Date.now()
-    };
+  const { currentUser: authUser } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [profileData, setProfileData] = useState({
+    name: '',
+    email: '',
+    bio: '',
+    availability: 'Flexible',
+    skillsOffered: [],
+    skillsWanted: [],
+    state: '',
+    city: '',
+    id: ''
   });
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      if (!authUser) return;
+      try {
+        const docRef = doc(db, 'users', authUser.uid);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setProfileData({ ...data, id: authUser.uid });
+          localStorage.setItem('currentUser', JSON.stringify({ ...data, id: authUser.uid }));
+        }
+      } catch (err) {
+        console.error("Error fetching profile:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchProfile();
+  }, [authUser]);
 
   const [newSkillOffered, setNewSkillOffered] = useState('');
   const [newSkillWanted, setNewSkillWanted] = useState('');
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     e.preventDefault();
-    setIsEditing(false);
+    if (!authUser) return;
     
-    // Update currentColor in localStorage
-    localStorage.setItem('currentUser', JSON.stringify(profileData));
+    setIsEditing(false);
+    setLoading(true);
 
-    // Sync with users array in localStorage
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const userIndex = users.findIndex(u => u.id === profileData.id);
-    if (userIndex !== -1) {
-      users[userIndex] = profileData;
-      localStorage.setItem('users', JSON.stringify(users));
+    try {
+      const docRef = doc(db, 'users', authUser.uid);
+      await updateDoc(docRef, {
+        name: profileData.name,
+        bio: profileData.bio,
+        availability: profileData.availability,
+        skillsOffered: profileData.skillsOffered,
+        skillsWanted: profileData.skillsWanted,
+        state: profileData.state,
+        city: profileData.city
+      });
+      localStorage.setItem('currentUser', JSON.stringify({ ...profileData, id: authUser.uid }));
+    } catch (err) {
+      console.error("Error updating profile:", err);
+      alert("Failed to save profile. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -82,6 +114,14 @@ const Profile = () => {
     if (!matchedState) return [];
     return City.getCitiesOfState('IN', matchedState.isoCode);
   })();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center" style={{ height: '70vh' }}>
+        <Loader className="animate-spin" size={48} color="var(--color-primary)" />
+      </div>
+    );
+  }
 
   return (
     <div className="container animate-fade-in" style={{ padding: '2rem 1.5rem', maxWidth: '800px' }}>

@@ -1,16 +1,46 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Calendar, MessageCircle } from 'lucide-react';
+import { ArrowLeft, Calendar, MessageCircle, Loader } from 'lucide-react';
 import { MOCK_USERS } from '../data/users';
+import { db } from '../firebase';
+import { doc, getDoc, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
 
 const UserProfile = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  // Look up in real registered users first, then fall back to mock data
-  const realUsers = JSON.parse(localStorage.getItem('users') || '[]');
-  const allUsers = [...realUsers, ...MOCK_USERS];
-  const user = allUsers.find(u => String(u.id) === String(id));
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        // Try Firestore first
+        const docRef = doc(db, 'users', id);
+        const docSnap = await getDoc(docRef);
+        
+        if (docSnap.exists()) {
+          setUser({ ...docSnap.data(), id: docSnap.id });
+        } else {
+          // Fallback to MOCK_USERS
+          const mockUser = MOCK_USERS.find(u => String(u.id) === String(id));
+          setUser(mockUser || null);
+        }
+      } catch (err) {
+        console.error("Error fetching user:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchUser();
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center" style={{ height: '70vh' }}>
+        <Loader className="animate-spin" size={48} color="var(--color-primary)" />
+      </div>
+    );
+  }
 
   if (!user) {
     return (
@@ -21,37 +51,41 @@ const UserProfile = () => {
     );
   }
 
-  const handleConnect = () => {
-    if (localStorage.getItem('isAuthenticated') !== 'true') {
+  const handleConnect = async () => {
+    const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    if (!currentUser.id) {
       navigate('/login');
       return;
     }
 
-    const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-    const existingRequests = JSON.parse(localStorage.getItem('skillSwapRequests') || '[]');
-    
-    const alreadyConnected = existingRequests.some(
-      req => req.senderId === currentUser.id && req.receiverId === user.id
-    );
+    try {
+      // Check if a request already exists in Firestore
+      const q = query(
+        collection(db, 'requests'),
+        where('senderId', '==', currentUser.id),
+        where('receiverId', '==', user.id)
+      );
+      const querySnapshot = await getDocs(q);
 
-    if (alreadyConnected) {
-      alert(`You've already sent a request to ${user.name}!`);
-    } else {
-      const newRequest = {
-        id: Date.now(),
-        senderId: currentUser.id,
-        senderName: currentUser.name,
-        receiverId: user.id,
-        skillWanted: user.skillsOffered[0] || 'Any skill',
-        skillOffered: currentUser.skillsOffered[0] || 'Any skill',
-        status: 'pending',
-        time: 'Just now'
-      };
+      if (!querySnapshot.empty) {
+        alert(`You've already sent a request to ${user.name}!`);
+      } else {
+        // Create new request in Firestore
+        await addDoc(collection(db, 'requests'), {
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          receiverId: user.id,
+          skillWanted: user.skillsOffered[0] || 'Any skill',
+          skillOffered: currentUser.skillsOffered[0] || 'Any skill',
+          status: 'pending',
+          createdAt: new Date().toISOString()
+        });
 
-      const updatedRequests = [...existingRequests, newRequest];
-      localStorage.setItem('skillSwapRequests', JSON.stringify(updatedRequests));
-
-      alert(`Connection request sent to ${user.name}!`);
+        alert(`Connection request sent to ${user.name}!`);
+      }
+    } catch (err) {
+      console.error("Error connecting:", err);
+      alert("Something went wrong. Please try again.");
     }
   };
 

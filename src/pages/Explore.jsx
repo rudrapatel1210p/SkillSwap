@@ -1,26 +1,41 @@
-import React, { useState } from 'react';
-import { Search } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, Loader } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import UserCard from '../components/UserCard';
 import { MOCK_USERS } from '../data/users';
+import { db } from '../firebase';
+import { collection, getDocs, addDoc, query, where } from 'firebase/firestore';
 
 const Explore = () => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [connectionMessage, setConnectionMessage] = useState(null);
+  const [allUsers, setAllUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  // Get current logged-in user's id so we don't show them their own card
   const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
 
-  // Merge real registered users from localStorage with mock users
-  const realUsers = JSON.parse(localStorage.getItem('users') || '[]')
-    .filter(u => u.id !== currentUser.id)  // hide self
-    .map(u => ({ ...u, isRealUser: true }));
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const querySnapshot = await getDocs(collection(db, 'users'));
+        const realUsers = [];
+        querySnapshot.forEach((doc) => {
+          if (doc.id !== currentUser.id) {
+            realUsers.push({ ...doc.data(), id: doc.id, isRealUser: true });
+          }
+        });
 
-  // Combine: real registered users first, then mocks (no duplicates by id)
-  const realUserEmails = realUsers.map(u => u.email);
-  const mockUsers = MOCK_USERS.filter(u => !realUserEmails.includes(u.email));
-  const allUsers = [...realUsers, ...mockUsers];
+        const realUserEmails = realUsers.map(u => u.email);
+        const mockUsers = MOCK_USERS.filter(u => !realUserEmails.includes(u.email));
+        setAllUsers([...realUsers, ...mockUsers]);
+      } catch (err) {
+        console.error("Error fetching users:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchUsers();
+  }, [currentUser.id]);
 
   const filteredUsers = allUsers.filter(user => {
     const term = searchTerm.toLowerCase();
@@ -32,39 +47,40 @@ const Explore = () => {
     return matchesName || matchesOffered || matchesWanted;
   });
 
-  const handleConnect = (user) => {
-    if (localStorage.getItem('isAuthenticated') !== 'true') {
+  const handleConnect = async (user) => {
+    if (!currentUser.id) {
       navigate('/login');
       return;
     }
 
-    // Get existing requests
-    const existingRequests = JSON.parse(localStorage.getItem('skillSwapRequests') || '[]');
-    
-    // Check if a request already exists between these users
-    const alreadyConnected = existingRequests.some(
-      req => req.senderId === currentUser.id && req.receiverId === user.id
-    );
+    try {
+      // Check if a request already exists in Firestore
+      const q = query(
+        collection(db, 'requests'),
+        where('senderId', '==', currentUser.id),
+        where('receiverId', '==', user.id)
+      );
+      const querySnapshot = await getDocs(q);
 
-    if (alreadyConnected) {
-      setConnectionMessage(`You've already sent a request to ${user.name}!`);
-    } else {
-      // Create new request
-      const newRequest = {
-        id: Date.now(),
-        senderId: currentUser.id,
-        senderName: currentUser.name,
-        receiverId: user.id,
-        skillWanted: user.skillsOffered[0] || 'Any skill', // Taking the first skill for this demo
-        skillOffered: currentUser.skillsOffered[0] || 'Any skill',
-        status: 'pending',
-        time: 'Just now'
-      };
+      if (!querySnapshot.empty) {
+        setConnectionMessage(`You've already sent a request to ${user.name}!`);
+      } else {
+        // Create new request in Firestore
+        await addDoc(collection(db, 'requests'), {
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          receiverId: user.id,
+          skillWanted: user.skillsOffered[0] || 'Any skill',
+          skillOffered: currentUser.skillsOffered[0] || 'Any skill',
+          status: 'pending',
+          createdAt: new Date().toISOString()
+        });
 
-      const updatedRequests = [...existingRequests, newRequest];
-      localStorage.setItem('skillSwapRequests', JSON.stringify(updatedRequests));
-
-      setConnectionMessage(`Connection request sent to ${user.name}!`);
+        setConnectionMessage(`Connection request sent to ${user.name}!`);
+      }
+    } catch (err) {
+      console.error("Error connecting:", err);
+      setConnectionMessage("Something went wrong. Please try again.");
     }
 
     setTimeout(() => setConnectionMessage(null), 3000);
@@ -104,7 +120,11 @@ const Explore = () => {
       )}
 
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '2rem' }}>
-        {filteredUsers.length > 0 ? (
+        {loading ? (
+          <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '4rem 0' }}>
+            <Loader className="animate-spin" size={48} color="var(--color-primary)" />
+          </div>
+        ) : filteredUsers.length > 0 ? (
           filteredUsers.map(user => (
             <UserCard key={user.id} user={user} onConnect={handleConnect} />
           ))

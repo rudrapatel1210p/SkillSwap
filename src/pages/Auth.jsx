@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { LogIn, UserPlus } from 'lucide-react';
-import { auth } from '../firebase';
+import { auth, db } from '../firebase';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendEmailVerification, updateProfile } from 'firebase/auth';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
 
 const Auth = ({ type }) => {
@@ -37,12 +38,9 @@ const Auth = ({ type }) => {
     try {
       if (isLogin) {
         const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
-        
-        // Sync local storage for mock data fallback depending on this app's existing pages
-        const storedUsers = JSON.parse(localStorage.getItem('users') || '[]');
-        let mockMatchedUser = storedUsers.find(u => u.email === formData.email);
-        if (mockMatchedUser) {
-          localStorage.setItem('currentUser', JSON.stringify(mockMatchedUser));
+        const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
+        if (userDoc.exists()) {
+          localStorage.setItem('currentUser', JSON.stringify({ ...userDoc.data(), id: userCredential.user.uid }));
         }
         
         if (!userCredential.user.emailVerified) {
@@ -68,18 +66,21 @@ const Auth = ({ type }) => {
         const newUser = {
           name: formData.name,
           email: formData.email,
-          id: user.uid,
           role: selectedRole,
           skillsOffered: [],
           skillsWanted: [],
           bio: '',
-          availability: 'Flexible'
+          availability: 'Flexible',
+          state: '',
+          city: '',
+          createdAt: new Date().toISOString()
         };
         
-        const storedUsers = JSON.parse(localStorage.getItem('users') || '[]');
-        storedUsers.push(newUser);
-        localStorage.setItem('users', JSON.stringify(storedUsers));
-        localStorage.setItem('currentUser', JSON.stringify(newUser));
+        // Save to Firestore
+        await setDoc(doc(db, 'users', user.uid), newUser);
+        
+        // Sync local storage for current session
+        localStorage.setItem('currentUser', JSON.stringify({ ...newUser, id: user.uid }));
         
         localStorage.setItem('isOnboarding', 'true');
         navigate('/verify-email');

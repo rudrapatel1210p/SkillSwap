@@ -1,42 +1,65 @@
-import React, { useState } from 'react';
-import { Check, X, Clock } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Check, X, Clock, Loader } from 'lucide-react';
+import { db } from '../firebase';
+import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 
 const Requests = () => {
   const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-  
-  const [requests, setRequests] = useState(() => {
-    const savedRequests = JSON.parse(localStorage.getItem('skillSwapRequests') || '[]');
-    // Only show requests where the current user is recorded as the receiver
-    const incomingRequests = savedRequests.filter(r => r.receiverId === currentUser.id);
-    
-    // If no incoming requests, we can keep some initial mock data for demo purposes if the user is empty
-    if (incomingRequests.length === 0 && !currentUser.id) {
-      return [
-        { id: 1, senderName: 'John Smith', skillWanted: 'React', skillOffered: 'Python', status: 'pending', time: '2 hours ago' },
-        { id: 2, senderName: 'Sarah Connor', skillWanted: 'HTML/CSS', skillOffered: 'UX Design', status: 'accepted', time: '1 day ago' },
-      ];
-    }
-    return incomingRequests;
-  });
+  const [loading, setLoading] = useState(true);
+  const [requests, setRequests] = useState([]);
 
-  const handleAction = (id, action) => {
-    // Update local state
-    const updatedRequests = requests.map(req => 
-      req.id === id ? { ...req, status: action === 'accept' ? 'accepted' : 'rejected' } : req
-    );
-    setRequests(updatedRequests);
+  useEffect(() => {
+    const fetchRequests = async () => {
+      if (!currentUser.id) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const q = query(
+          collection(db, 'requests'),
+          where('receiverId', '==', currentUser.id)
+        );
+        const querySnapshot = await getDocs(q);
+        const fetchedRequests = [];
+        querySnapshot.forEach((doc) => {
+          fetchedRequests.push({ ...doc.data(), id: doc.id });
+        });
+        setRequests(fetchedRequests);
+      } catch (err) {
+        console.error("Error fetching requests:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchRequests();
+  }, [currentUser.id]);
 
-    // Sync with global localStorage
-    const allRequests = JSON.parse(localStorage.getItem('skillSwapRequests') || '[]');
-    const globalIndex = allRequests.findIndex(r => r.id === id);
-    if (globalIndex !== -1) {
-      allRequests[globalIndex].status = action === 'accept' ? 'accepted' : 'rejected';
-      localStorage.setItem('skillSwapRequests', JSON.stringify(allRequests));
+  const handleAction = async (id, action) => {
+    try {
+      const docRef = doc(db, 'requests', id);
+      const newStatus = action === 'accept' ? 'accepted' : 'rejected';
+      await updateDoc(docRef, { status: newStatus });
+
+      // Update local state
+      setRequests(requests.map(req => 
+        req.id === id ? { ...req, status: newStatus } : req
+      ));
+    } catch (err) {
+      console.error("Error updating request:", err);
+      alert("Failed to update request. Please try again.");
     }
   };
 
   const pendingRequests = requests.filter(r => r.status === 'pending');
   const pastRequests = requests.filter(r => r.status !== 'pending');
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center" style={{ height: '70vh' }}>
+        <Loader className="animate-spin" size={48} color="var(--color-primary)" />
+      </div>
+    );
+  }
 
   return (
     <div className="container animate-fade-in" style={{ padding: '2rem 1.5rem', maxWidth: '800px' }}>
@@ -64,7 +87,7 @@ const Requests = () => {
                     Wants to learn <span style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{req.skillWanted}</span> • 
                     Can teach <span style={{ fontWeight: 600, color: 'var(--color-secondary)' }}>{req.skillOffered}</span>
                   </p>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>{req.time}</p>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '0.25rem' }}>{new Date(req.createdAt).toLocaleString()}</p>
                 </div>
                 <div className="flex gap-2">
                   <button 
